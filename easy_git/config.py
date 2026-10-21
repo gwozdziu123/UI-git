@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-SERVICE = "EasyGit"
+SERVICE = "UI-git"
+OLD_SERVICE = "EasyGit"  # nazwa sprzed zmiany – dane są przenoszone automatycznie
 TOKEN_KEY = "github_token"
 
 
@@ -16,8 +17,15 @@ def config_dir() -> Path:
         base = Path(os.environ.get("APPDATA", Path.home()))
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    d = base / "EasyGit"
-    d.mkdir(parents=True, exist_ok=True)
+    d = base / "UI-git"
+    if not d.exists():
+        d.mkdir(parents=True, exist_ok=True)
+        old = base / "EasyGit" / "config.json"
+        if old.exists():  # przeniesienie listy projektów ze starej nazwy
+            try:
+                (d / "config.json").write_bytes(old.read_bytes())
+            except OSError:
+                pass
     return d
 
 
@@ -78,7 +86,17 @@ def load_token() -> Optional[str]:
     if not kr:
         return None
     try:
-        return kr.get_password(SERVICE, TOKEN_KEY)
+        token = kr.get_password(SERVICE, TOKEN_KEY)
+        if not token:
+            # Token zapisany przez wcześniejszą wersję (EasyGit) – przenieś pod nową nazwę.
+            token = kr.get_password(OLD_SERVICE, TOKEN_KEY)
+            if token:
+                kr.set_password(SERVICE, TOKEN_KEY, token)
+                try:
+                    kr.delete_password(OLD_SERVICE, TOKEN_KEY)
+                except Exception:
+                    pass
+        return token
     except Exception:
         return None
 
@@ -97,7 +115,8 @@ def save_token(token: str) -> bool:
 def delete_token():
     kr = _keyring()
     if kr:
-        try:
-            kr.delete_password(SERVICE, TOKEN_KEY)
-        except Exception:
-            pass
+        for service in (SERVICE, OLD_SERVICE):
+            try:
+                kr.delete_password(service, TOKEN_KEY)
+            except Exception:
+                pass

@@ -1,4 +1,4 @@
-"""Główne okno aplikacji EasyGit."""
+"""Główne okno aplikacji UI-git."""
 from __future__ import annotations
 
 import os
@@ -111,7 +111,7 @@ def card_head(*widgets, right=None) -> QWidget:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EasyGit")
+        self.setWindowTitle("UI-git")
         self.setWindowIcon(app_icon())
         self.resize(1320, 840)
         self.setMinimumSize(980, 640)
@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         logo = QLabel()
         logo.setPixmap(app_icon().pixmap(32, 32))
         th.addWidget(logo)
-        th.addWidget(label("EasyGit", "screenTitle"))
+        th.addWidget(label("UI-git", "screenTitle"))
         th.addStretch(1)
         b = button("Powiąż folder", "ghost", "folder")
         b.setToolTip("Połącz folder na dysku z repozytorium na GitHubie")
@@ -1282,7 +1282,7 @@ class MainWindow(QMainWindow):
             self.toast._place()
 
     def closeEvent(self, e):
-        if self.busy and not ask(self, "EasyGit", "Trwa operacja. Zamknąć mimo to?", "Zamknij"):
+        if self.busy and not ask(self, "UI-git", "Trwa operacja. Zamknąć mimo to?", "Zamknij"):
             e.ignore()
             return
         super().closeEvent(e)
@@ -1292,13 +1292,13 @@ def main():
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("EasyGit.App")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("UI-git.App")
         except Exception:  # noqa: BLE001
             pass
     app = QApplication(sys.argv)
-    app.setApplicationName("EasyGit")
+    app.setApplicationName("UI-git")
     app.setApplicationVersion(__version__)
-    theme.apply(app, os.environ.get("EASYGIT_THEME") or None)
+    theme.apply(app, (os.environ.get("UIGIT_THEME") or os.environ.get("EASYGIT_THEME")) or None)
     theme.follow_system(app)
     app.setWindowIcon(app_icon())
     w = MainWindow()

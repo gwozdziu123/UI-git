@@ -28,4 +28,4 @@ if not exist ".venv\installed.ok" (
     echo ok> ".venv\installed.ok"
 )
 
-start "" ".venv\Scripts\pythonw.exe" EasyGit.pyw
+start "" ".venv\Scripts\pythonw.exe" UI-git.pyw

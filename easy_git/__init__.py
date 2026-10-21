@@ -1,2 +1,2 @@
-"""EasyGit – proste zarządzanie repozytoriami GitHub."""
+"""UI-git – proste zarządzanie repozytoriami GitHub."""
 __version__ = "1.0.0"

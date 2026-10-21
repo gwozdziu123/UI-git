@@ -1,4 +1,4 @@
-# EasyGit
+# UI-git
 
 Prosta aplikacja okienkowa (Windows) do zarządzania repozytoriami na GitHubie:
 powiązujesz lokalny folder z repozytorium i wysyłasz zmiany jednym przyciskiem.
@@ -14,7 +14,7 @@ powiązujesz lokalny folder z repozytorium i wysyłasz zmiany jednym przyciskiem
    i zainstaluje biblioteki (PySide6, requests, keyring) – to potrwa ok. minuty.
 2. Kolejne uruchomienia: znowu `run.bat` (startuje od razu, bez okna konsoli).
 
-Własny plik `.exe`: uruchom `build_exe.bat` → wynik w `dist\EasyGit.exe`
+Własny plik `.exe`: uruchom `build_exe.bat` → wynik w `dist\UI-git.exe`
 (można go skopiować w dowolne miejsce; Git nadal musi być zainstalowany).
 
 ## Pierwsze kroki
@@ -51,19 +51,19 @@ Własny plik `.exe`: uruchom `build_exe.bat` → wynik w `dist\EasyGit.exe`
 - Autor commitów: Twoja konfiguracja `git config user.name/user.email`, a jeśli jej nie ma – dane z konta GitHub.
 - Token jest przekazywany do gita przez zmienne środowiskowe tylko na czas operacji – nie jest zapisywany
   w `.git/config` ani w adresie repozytorium.
-- Ustawienia (lista projektów): `%APPDATA%\EasyGit\config.json`.
+- Ustawienia (lista projektów): `%APPDATA%\UI-git\config.json`.
 
 ## Wygląd
 
 Interfejs korzysta z design systemu el_Fuszka: jasne tło `#f2f4f8`, treść na białych kartach (promień 14 px),
 jeden niebieski akcent `#1d4ed8`, statusy zawsze z kolorową kropką i słowem, ikony liniowe 24×24, toasty
 potwierdzające („Zatwierdzono”, „Wysłano na GitHuba”). Motyw ciemny włącza się automatycznie razem z ustawieniem
-Windows. Do podglądu konkretnego motywu: `set EASYGIT_THEME=dark` (albo `light`) przed uruchomieniem.
+Windows. Do podglądu konkretnego motywu: `set UIGIT_THEME=dark` (albo `light`) przed uruchomieniem.
 
 ## Struktura
 
 ```
-EasyGit.pyw              start aplikacji (bez konsoli)
+UI-git.pyw               start aplikacji (bez konsoli)
 easy_git/app.py          okno główne
 easy_git/dialogs.py      okna: logowanie, powiązanie, nowe repo, klonowanie, .gitignore
 easy_git/git_ops.py      operacje git (status, commit, push, pull, historia…)

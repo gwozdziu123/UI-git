@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QHBox
 from .gitignore_templates import TEMPLATES
 from .widgets import Card, DiffView, button, field, label, notify, separator
 
-TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo&description=EasyGit"
+TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo&description=UI-git"
 
 
 def slugify_repo_name(name: str) -> str:

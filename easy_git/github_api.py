@@ -46,7 +46,7 @@ class GitHub:
         self.s.headers.update({
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "EasyGit",
+            "User-Agent": "UI-git",
         })
         if token:
             self.s.headers["Authorization"] = f"Bearer {token}"
