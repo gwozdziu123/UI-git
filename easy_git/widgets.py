@@ -231,8 +231,8 @@ class EmptyState(QWidget):
         v.setContentsMargins(24, 48, 24, 48)
         v.setSpacing(8)
         v.addStretch(1)
-        ic = IconLabel(icon, "muted", 56, 0.5)
-        v.addWidget(ic, 0, Qt.AlignHCenter)
+        self.icon = IconLabel(icon, "muted", 56, 0.5)
+        v.addWidget(self.icon, 0, Qt.AlignHCenter)
         self.title = label(title, "cardTitle")
         self.title.setAlignment(Qt.AlignCenter)
         v.addWidget(self.title)
@@ -251,10 +251,13 @@ class EmptyState(QWidget):
     def add_button(self, b: QPushButton):
         self.btns.insertWidget(self.btns.count() - 1, b)
 
-    def set_text(self, title: str, text: str = ""):
+    def set_text(self, title: str, text: str = "", icon: str = ""):
         self.title.setText(title)
         self.text.setText(text)
         self.text.setVisible(bool(text))
+        if icon and icon != self.icon.name:
+            self.icon.name = icon
+            self.icon._paint()
 
 
 class Toast(QLabel):

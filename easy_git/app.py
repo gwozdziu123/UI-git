@@ -33,6 +33,14 @@ def plural_zmian(n: int) -> str:
     return f"{n} zmian"
 
 
+def plural_commit(n: int) -> str:
+    if n == 1:
+        return "1 commit"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return f"{n} commity"
+    return f"{n} commitów"
+
+
 def status_of(info: RepoInfo | None, exists: bool = True) -> tuple[str, str]:
     """Status projektu jako (token koloru, słowo)."""
     if not exists:
@@ -61,8 +69,12 @@ def friendly_error(msg: str) -> str:
     hints = []
     if "fetch first" in low or "non-fast-forward" in low or "[rejected]" in low:
         hints.append("Na GitHubie są nowsze zmiany. Kliknij „Pobierz”, a potem wyślij ponownie.")
-    if "authentication failed" in low or "could not read username" in low or "403" in low:
-        hints.append("Nie udało się uwierzytelnić. Zaloguj się ponownie tokenem z uprawnieniem repo.")
+    if "permission to" in low and "denied" in low or "403" in low:
+        hints.append("Token nie ma uprawnień do zapisu w tym repozytorium. Utwórz nowy token (klasyczny z "
+                     "uprawnieniem repo albo fine-grained z dostępem Contents: Read and write do tego "
+                     "repozytorium), wyloguj się i zaloguj ponownie.")
+    elif "authentication failed" in low or "could not read username" in low or "401" in low:
+        hints.append("Nie udało się zalogować do GitHuba. Token mógł wygasnąć – zaloguj się ponownie.")
     if "repository not found" in low:
         hints.append("Nie znaleziono repozytorium – sprawdź adres i czy token ma do niego dostęp.")
     if "would be overwritten" in low:
@@ -434,6 +446,14 @@ class MainWindow(QMainWindow):
         self.diff = DiffView()
         self.diff_stack.addWidget(self.diff)
         self.diff_empty = EmptyState("box", "Brak zmian", "Wszystko jest zatwierdzone.")
+        self.empty_push = button("Wyślij na GitHuba", "primary", "upload")
+        self.empty_push.clicked.connect(self.push)
+        self.empty_pull = button("Pobierz z GitHuba", "primary", "download")
+        self.empty_pull.clicked.connect(self.pull)
+        self.diff_empty.add_button(self.empty_push)
+        self.diff_empty.add_button(self.empty_pull)
+        self.empty_push.hide()
+        self.empty_pull.hide()
         self.diff_stack.addWidget(self.diff_empty)
         rc.lay.addWidget(self.diff_stack, 1)
         sp.addWidget(rc)
@@ -971,11 +991,25 @@ class MainWindow(QMainWindow):
                         f"{info.behind} do pobrania" if info.behind else ""]
                 sync = " · ".join(b for b in bits if b) or "zgodna z GitHubem"
             elif info.remote_url:
-                sync = "jeszcze nie na GitHubie" if info.has_commits else "brak commitów"
+                sync = (f"jeszcze nie na GitHubie · {plural_commit(info.ahead)} do wysłania"
+                        if info.has_commits else "brak commitów")
             self.h_branch.setText(f"Gałąź <b>{info.branch or '?'}</b>"
                                   + (f" <span style='color:{T['muted']}'>· {sync}</span>" if sync else ""))
         self.btn_pull.setText(f"Pobierz · {info.behind}" if info.behind else "Pobierz")
         self.btn_push.setText(f"Wyślij · {info.ahead}" if info.ahead else "Wyślij")
+        # Gdy są commity do wysłania, „Wyślij” staje się główną akcją.
+        self._set_kind(self.btn_push, "upload", "primary" if info.ahead else "ghost")
+        self._set_kind(self.btn_pull, "download", "primary" if info.behind and not info.ahead else "ghost")
+
+    @staticmethod
+    def _set_kind(b, icon_name: str, kind: str):
+        name = "primary" if kind == "primary" else ""
+        if b.objectName() != name:
+            b.setObjectName(name)
+            b.style().unpolish(b)
+            b.style().polish(b)
+        b.setIcon(icons.icon(icon_name, T["on-primary" if kind == "primary" else "primary"], 20,
+                             disabled_color=T["muted"]))
 
     def _show_info(self, info: RepoInfo | None):
         self.info = info
@@ -1013,13 +1047,22 @@ class MainWindow(QMainWindow):
             self.diff_title.setText("Podgląd")
             self.diff_badge.set("muted", "")
             self.diff_stack.setCurrentIndex(1)
+            self.empty_push.setVisible(bool(info.ahead and info.remote_url))
+            self.empty_pull.setVisible(bool(info.behind and not info.ahead))
             if not info.is_repo:
                 self.diff_empty.set_text("To nie jest repozytorium",
-                                         "Użyj „Powiąż folder”, żeby połączyć go z GitHubem.")
+                                         "Użyj „Powiąż folder”, żeby połączyć go z GitHubem.", "box")
+            elif info.ahead and info.remote_url:
+                self.diff_empty.set_text("Czeka na wysłanie",
+                                         f"Do wysłania: {plural_commit(info.ahead)}. "
+                                         "Zmiany są zatwierdzone, ale nie ma ich jeszcze na GitHubie.", "upload")
+            elif info.behind:
+                self.diff_empty.set_text("Na GitHubie są nowe zmiany",
+                                         f"Do pobrania: {plural_commit(info.behind)}.", "download")
             elif info.has_commits:
-                self.diff_empty.set_text("Brak zmian", "Wszystko jest zatwierdzone.")
+                self.diff_empty.set_text("Brak zmian", "Wszystko jest zatwierdzone.", "box")
             else:
-                self.diff_empty.set_text("Folder jest pusty", "Dodaj pliki projektu – pojawią się tutaj.")
+                self.diff_empty.set_text("Folder jest pusty", "Dodaj pliki projektu – pojawią się tutaj.", "box")
         self.tabs.setTabText(0, f"Zmiany · {len(info.changes)}" if info.changes else "Zmiany")
         self._set_project_enabled(True)
         if self.tabs.currentIndex() == 1:

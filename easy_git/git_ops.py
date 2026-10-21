@@ -216,6 +216,10 @@ class Repo:
         info.upstream = self.upstream() if info.has_commits else ""
         if info.upstream:
             info.ahead, info.behind = self.ahead_behind()
+        elif info.has_commits and info.remote_url:
+            # Gałąź jeszcze nie istnieje na GitHubie – policz commity, których tam nie ma.
+            n = self._try("rev-list", "--count", "HEAD", "--not", "--remotes=origin")
+            info.ahead = int(n) if n.isdigit() else 0
         info.merging = self.is_merging()
         info.changes = self.status()
         return info
