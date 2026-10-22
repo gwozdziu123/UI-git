@@ -176,6 +176,7 @@ QPushButton#dangerGhost {{ color: {c['danger']}; }}
 QPushButton#tall {{ min-height: 48px; }}
 QPushButton#add {{ border: 0; color: {c['primary']}; padding: 0 10px; border-radius: {RADIUS['sm']}px; min-height: 36px; }}
 QPushButton#add:pressed {{ background: {c['primary-weak']}; }}
+QPushButton#add:disabled {{ color: {c['muted']}; }}
 QPushButton#iconBtn {{ border: 0; min-width: 40px; max-width: 40px; min-height: 40px; max-height: 40px;
   padding: 0; border-radius: 20px; }}
 QPushButton#iconBtn:pressed {{ background: {c['line']}; }}

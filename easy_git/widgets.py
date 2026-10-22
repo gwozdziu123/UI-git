@@ -394,6 +394,36 @@ class DiffHighlighter(QSyntaxHighlighter):
             self.setFormat(0, len(text), self.hunk)
 
 
+class GitignoreHighlighter(QSyntaxHighlighter):
+    """Kolorowanie .gitignore: komentarze muted, wyjątki (!) w primary, foldery pogrubione."""
+
+    def __init__(self, doc):
+        super().__init__(doc)
+        self.update_colors()
+
+    def update_colors(self):
+        self.comment = QTextCharFormat()
+        self.comment.setForeground(T.q("muted"))
+        self.header = QTextCharFormat(self.comment)
+        self.header.setFontWeight(QFont.Bold)
+        self.neg = QTextCharFormat()
+        self.neg.setForeground(T.q("primary"))
+        self.neg.setFontWeight(QFont.Bold)
+        self.dir = QTextCharFormat()
+        self.dir.setFontWeight(QFont.DemiBold)
+
+    def highlightBlock(self, text: str):
+        t = text.strip()
+        if t.startswith("# ====="):
+            self.setFormat(0, len(text), self.header)
+        elif t.startswith("#"):
+            self.setFormat(0, len(text), self.comment)
+        elif t.startswith("!"):
+            self.setFormat(0, len(text), self.neg)
+        elif t.endswith("/"):
+            self.setFormat(0, len(text), self.dir)
+
+
 class DiffView(QPlainTextEdit):
     def __init__(self, parent=None, highlight: bool = True):
         super().__init__(parent)
@@ -496,7 +526,7 @@ class RepoDelegate(_RowDelegate):
 
 KIND_TOKENS = {
     "nowy": "s-zakonczony", "dodany": "s-zakonczony", "zmieniony": "s-w_trakcie",
-    "usunięty": "danger", "konflikt": "danger", "przeniesiony": "primary",
+    "usunięty": "danger", "konflikt": "danger", "przeniesiony": "primary", "usunięty z repo": "s-wycena",
 }
 
 

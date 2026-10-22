@@ -365,6 +365,7 @@ class MainWindow(QMainWindow):
         self.btn_push.setToolTip("Wyślij zatwierdzone zmiany na GitHuba (push)")
         self.btn_push.clicked.connect(self.push)
         self.btn_ignore = button(".gitignore", "ghost", "edit")
+        self.btn_ignore.setToolTip("Edytuj plik .gitignore – reguły pomijania plików")
         self.btn_ignore.clicked.connect(self.edit_gitignore)
         self.btn_web = button("Otwórz na GitHubie", "ghost", "share")
         self.btn_web.clicked.connect(self._open_current_web)
@@ -1154,9 +1155,9 @@ class MainWindow(QMainWindow):
     def edit_gitignore(self):
         if not self.current:
             return
-        dlg = GitignoreDialog(self.current, self.run_task, GitHub(self.token), self)
+        dlg = GitignoreDialog(self.current, self.run_task, GitHub(self.token), self, log=self.logbus)
         if dlg.exec() == GitignoreDialog.Accepted:
-            self.say("Zaktualizowano .gitignore")
+            self.say(dlg.result_msg, 4000)
             self.refresh_current()
 
     def commit(self, push: bool):

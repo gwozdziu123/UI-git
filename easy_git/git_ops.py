@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -30,12 +31,20 @@ class FileChange:
     index: str  # status w indeksie (X)
     worktree: str  # status w katalogu roboczym (Y)
     orig_path: str = ""
+    on_disk: bool = True
+
+    @property
+    def untracked_only(self) -> bool:
+        """Usunięty tylko z repozytorium (git rm --cached) – plik zostaje na dysku."""
+        return self.index == "D" and self.worktree in " ?" and self.on_disk
 
     @property
     def kind(self) -> str:
         x, y = self.index, self.worktree
         if x == "?" and y == "?":
             return "nowy"
+        if self.untracked_only:
+            return "usunięty z repo"
         if "U" in (x, y) or (x == y and x in "AD"):
             return "konflikt"
         if "D" in (x, y):
@@ -202,8 +211,11 @@ class Repo:
             if x in "RC" or y in "RC":
                 orig = parts[i] if i < len(parts) else ""
                 i += 1
-            changes.append(FileChange(path=path, index=x, worktree=y, orig_path=orig))
-        return changes
+            on_disk = (Path(self.path) / path).exists() if x == "D" else True
+            changes.append(FileChange(path=path, index=x, worktree=y, orig_path=orig, on_disk=on_disk))
+        # Plik wyjęty z repozytorium, ale nadal nieignorowany, pojawia się dwa razy (D + ??) – zostaw jeden wpis.
+        staged_d = {c.path for c in changes if c.untracked_only}
+        return [c for c in changes if not (c.kind == "nowy" and c.path in staged_d)]
 
     def info(self) -> RepoInfo:
         info = RepoInfo(path=self.path)
@@ -264,6 +276,9 @@ class Repo:
 
     def file_diff(self, change: FileChange) -> str:
         full = Path(self.path) / change.path
+        if change.untracked_only:
+            return (f"{change.path}\n\nTen plik zostanie usunięty z repozytorium (także z GitHuba po wysłaniu),\n"
+                    "ale zostaje na Twoim dysku. Zwykle dlatego, że pasuje do reguły w .gitignore.")
         if change.kind == "nowy":
             if full.is_dir():
                 return ""
@@ -372,12 +387,34 @@ class Repo:
                 raise GitError("Te pliki nadal zawierają znaczniki konfliktu (<<<<<<<):\n" + "\n".join(bad))
             self.git("add", "-A")
             return self.git(*ident, "commit", "-F", "-", input_text=message.strip() + "\n")
-        # Wyczyść indeks, potem dodaj tylko zaznaczone pliki.
-        if self.has_commits():
-            self.git("reset", "-q")
-        else:
-            self.git("rm", "-r", "-q", "--cached", "--ignore-unmatch", ".")
-        self.git("add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul", input_text="\0".join(paths) + "\0")
+        # Do commita trafiają tylko zaznaczone pliki: wycofaj z indeksu resztę, dodaj zaznaczone.
+        selected = set(paths)
+        changes = self.status()
+        unstage = []
+        for c in changes:
+            if c.index not in " ?" and c.path not in selected:
+                unstage.append(c.path)
+                if c.orig_path:
+                    unstage.append(c.orig_path)
+        if unstage:
+            nul = "\0".join(unstage) + "\0"
+            if self.has_commits():
+                self.git("reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", input_text=nul)
+            else:
+                self.git("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--pathspec-from-file=-",
+                         "--pathspec-file-nul", input_text=nul)
+        by_path = {c.path: c for c in changes}
+        to_add = []
+        for p in paths:
+            c = by_path.get(p)
+            if c and c.untracked_only:
+                continue  # już przygotowane w indeksie (git rm --cached) – nie dodawaj z powrotem
+            to_add.append(p)
+            if c and c.orig_path:
+                to_add.append(c.orig_path)
+        if to_add:
+            self.git("add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
+                     input_text="\0".join(to_add) + "\0")
         return self.git(*ident, "commit", "-F", "-", input_text=message.strip() + "\n")
 
     def push(self) -> str:
@@ -417,12 +454,40 @@ class Repo:
             if full.is_file():
                 full.unlink()
             return
+        if change.untracked_only:
+            # Plik zostaje na dysku – wystarczy przywrócić go do repozytorium.
+            self.git("reset", "-q", "--", change.path)
+            return
         if self.has_commits():
             self.git("checkout", "HEAD", "--", change.path)
             if change.orig_path:
                 self.git("checkout", "HEAD", "--", change.orig_path, check=False)
         else:
             self.git("rm", "-q", "--cached", "--", change.path, check=False)
+
+    def match_ignore(self, rules: str) -> tuple[list[str], list[str]]:
+        """Sprawdza reguły .gitignore (także niezapisane).
+
+        Zwraca (pliki/foldery, które zostaną pominięte, pliki już śledzone, których reguły nie obejmą)."""
+        fd, tmp = tempfile.mkstemp(suffix=".gitignore")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(rules)
+            ex = f"--exclude-from={tmp}"
+            skipped = self.git("ls-files", "-z", "--others", "--ignored", "--directory", ex).split("\0")
+            tracked = self.git("ls-files", "-z", "--cached", "--ignored", ex).split("\0") if self.has_commits() else []
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        return [x for x in skipped if x], [x for x in tracked if x]
+
+    def stop_tracking(self, paths: list[str]) -> None:
+        """git rm --cached – pliki znikają z repozytorium przy następnym commicie, ale zostają na dysku."""
+        if paths:
+            self.git("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--pathspec-from-file=-",
+                     "--pathspec-file-nul", input_text="\0".join(paths) + "\0")
 
     def ignore(self, pattern: str) -> None:
         gi = Path(self.path) / ".gitignore"

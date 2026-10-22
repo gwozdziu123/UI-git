@@ -7,12 +7,15 @@ import unicodedata
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QUrl
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QListWidget,
-                               QListWidgetItem, QSplitter, QVBoxLayout, QWidget)
+from PySide6.QtGui import QDesktopServices, QTextCursor
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QListWidget,
+                               QListWidgetItem, QPlainTextEdit, QSplitter, QVBoxLayout, QWidget)
 
 from .gitignore_templates import TEMPLATES
-from .widgets import Card, DiffView, button, field, label, notify, separator
+from .git_ops import Repo
+from .theme import T, font, on_change
+from .widgets import (Banner, Card, GitignoreHighlighter, ask, button, field, label, notify, section_label,
+                      separator)
 
 TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo&description=UI-git"
 
@@ -245,48 +248,156 @@ class CreateRepoDialog(SheetDialog):
 
 
 class GitignoreDialog(SheetDialog):
-    """Wybór szablonów .gitignore – wbudowanych i pobieranych z GitHuba."""
+    """Edytor pliku .gitignore: własne reguły, gotowe szablony i sprawdzenie, które pliki zostaną pominięte."""
 
-    def __init__(self, folder: str, run_task, github, parent=None):
-        super().__init__("Szablony .gitignore", "Dopisz do .gitignore", parent, 860)
-        self.resize(900, 620)
+    def __init__(self, folder: str, run_task, github, parent=None, log=None):
+        super().__init__(".gitignore", "Zapisz", parent, 980)
+        self.resize(1080, 800)
         self.folder, self.run_task, self.github = folder, run_task, github
+        self.repo = Repo(folder, log=log)
+        self.is_repo = self.repo.is_repo()
         self.remote_cache: dict[str, str] = {}
-        self.body.addWidget(label("Zaznacz szablony – reguły zostaną dopisane na końcu pliku .gitignore. "
-                                  "Pasujące pliki nie będą wysyłane na GitHuba.", "secondary", wrap=True))
+        self.result_msg = "Zapisano .gitignore"
+        self.tracked: list[str] = []
+        self.path = Path(folder) / ".gitignore"
+        self.original = self.path.read_text(encoding="utf-8", errors="replace") if self.path.exists() else ""
+
+        self.body.addWidget(label("Wpisz reguły bezpośrednio albo dodaj gotowy szablon. Pliki pasujące do reguł "
+                                  "nie będą wysyłane na GitHuba.", "secondary", wrap=True))
         sp = QSplitter(self)
         sp.setHandleWidth(12)
-        left = Card(padding=(4, 4, 4, 8), spacing=6)
+        sp.setChildrenCollapsible(False)
+
+        # --- szablony
+        left = Card(padding=(0, 0, 0, 0), spacing=0)
+        left.setMinimumWidth(250)
+        left.lay.addWidget(_head(section_label("Szablony")))
+        left.lay.addWidget(separator())
         self.list = QListWidget()
         self.list.setObjectName("plain")
         self.list.setSpacing(1)
         for name in TEMPLATES:
             self._add_item(name, ("local", name))
-        left.lay.addWidget(self.list, 1)
-        self.load_btn = button("Pobierz więcej z GitHuba", "add", "download")
+        self.list.itemDoubleClicked.connect(self._insert_selected)
+        self.list.currentItemChanged.connect(self._sync_tpl_buttons)
+        wrap = QWidget()
+        wl = QVBoxLayout(wrap)
+        wl.setContentsMargins(6, 6, 6, 6)
+        wl.addWidget(self.list)
+        left.lay.addWidget(wrap, 1)
+        left.lay.addWidget(separator())
+        lf = QVBoxLayout()
+        lf.setContentsMargins(8, 6, 8, 8)
+        lf.setSpacing(2)
+        self.insert_btn = button("Dodaj do pliku", "add", "plus")
+        self.insert_btn.clicked.connect(self._insert_selected)
+        lf.addWidget(self.insert_btn, 0, Qt.AlignLeft)
+        self.load_btn = button("Więcej z GitHuba", "add", "download")
         self.load_btn.clicked.connect(self._load_remote)
-        left.lay.addWidget(self.load_btn, 0, Qt.AlignLeft)
+        lf.addWidget(self.load_btn, 0, Qt.AlignLeft)
+        left.lay.addLayout(lf)
         sp.addWidget(left)
-        right = Card(padding=(8, 8, 8, 8))
-        self.preview = DiffView(highlight=False)
-        right.lay.addWidget(self.preview)
-        sp.addWidget(right)
-        sp.setSizes([300, 560])
-        self.body.addWidget(sp, 1)
-        self.list.currentItemChanged.connect(self._show)
-        gi = Path(folder) / ".gitignore"
-        if gi.exists():
-            self.preview.show_text("# Obecny .gitignore\n" + gi.read_text(encoding="utf-8", errors="replace"))
-        else:
-            self.list.setCurrentRow(0)
 
+        # --- edytor
+        right = Card(padding=(0, 0, 0, 0), spacing=0)
+        self.state = label("", "caption")
+        right.lay.addWidget(_head(section_label("Plik .gitignore"), self.state))
+        right.lay.addWidget(separator())
+        self.editor = QPlainTextEdit()
+        self.editor.setFont(font(14, 400, mono=True))
+        self.editor.setFrameShape(QFrame.NoFrame)
+        self.editor.setPlaceholderText("# Przykład\n*.bak\nLogs/\n!Logs/wazny.txt")
+        self.editor.setPlainText(self.original)
+        self.editor.setTabChangesFocus(True)
+        self.editor.setMinimumHeight(240)
+        self._hl = GitignoreHighlighter(self.editor.document())
+        on_change(self._recolor)
+        self.editor.textChanged.connect(self._on_text)
+        ew = QWidget()
+        el = QVBoxLayout(ew)
+        el.setContentsMargins(8, 6, 8, 6)
+        el.addWidget(self.editor)
+        right.lay.addWidget(ew, 1)
+        right.lay.addWidget(separator())
+
+        qa = QHBoxLayout()
+        qa.setContentsMargins(12, 10, 12, 4)
+        qa.setSpacing(8)
+        self.quick = QLineEdit()
+        self.quick.setPlaceholderText("Dodaj regułę, np. *.bak albo Logs/")
+        self.quick.returnPressed.connect(self._quick_add)
+        qa.addWidget(self.quick, 1)
+        b = button("Dodaj", "ghost", "plus")
+        b.setMinimumHeight(44)
+        b.clicked.connect(self._quick_add)
+        qa.addWidget(b)
+        right.lay.addLayout(qa)
+        hint = label("*.log – pliki z rozszerzeniem  ·  Logs/ – cały folder  ·  !wzór – wyjątek  ·  # komentarz",
+                     "hint", wrap=True)
+        hint.setContentsMargins(12, 0, 12, 10)
+        right.lay.addWidget(hint)
+
+        if self.is_repo:
+            right.lay.addWidget(separator())
+            ck = QHBoxLayout()
+            ck.setContentsMargins(8, 6, 12, 6)
+            self.check_btn = button("Sprawdź, co zostanie pominięte", "add", "search")
+            self.check_btn.clicked.connect(self._check)
+            ck.addWidget(self.check_btn)
+            self.check_info = label("", "caption")
+            ck.addWidget(self.check_info, 1)
+            right.lay.addLayout(ck)
+            self.results = QListWidget()
+            self.results.setObjectName("plain")
+            self.results.setMaximumHeight(104)
+            self.results.hide()
+            rw = QWidget()
+            rl = QVBoxLayout(rw)
+            rl.setContentsMargins(8, 0, 8, 8)
+            rl.setSpacing(8)
+            rl.addWidget(self.results)
+            self.tracked_bar = Banner("")
+            self.untrack_btn = button("Zapisz i wyjmij z repozytorium", "ghost")
+            self.untrack_btn.clicked.connect(self._save_untrack)
+            self.tracked_bar.actions.addWidget(self.untrack_btn)
+            self.tracked_bar.hide()
+            rl.addWidget(self.tracked_bar)
+            right.lay.addWidget(rw)
+        sp.addWidget(right)
+        sp.setSizes([280, 740])
+        sp.setStretchFactor(1, 1)
+        self.body.addWidget(sp, 1)
+        self._on_text()
+        self.list.setCurrentRow(0)
+
+    # ---------------------------------------------------------------- szablony
     def _add_item(self, text, data):
         it = QListWidgetItem(text)
-        it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-        it.setCheckState(Qt.Unchecked)
         it.setData(Qt.UserRole, data)
         it.setSizeHint(QSize(0, 38))
         self.list.addItem(it)
+
+    @staticmethod
+    def _header(name: str) -> str:
+        return f"# ===== {name} ====="
+
+    def _sync_tpl_buttons(self, *_):
+        it = self.list.currentItem()
+        present = bool(it and self._header(it.data(Qt.UserRole)[1]) in self.editor.toPlainText())
+        self.insert_btn.setEnabled(bool(it) and not present)
+        self.insert_btn.setText("Już jest w pliku" if present else "Dodaj do pliku")
+
+    def _mark_templates(self):
+        text = self.editor.toPlainText()
+        muted = T.q("muted")
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            kind, name = it.data(Qt.UserRole)
+            base = name if kind == "local" else f"GitHub: {name}"
+            present = self._header(name) in text
+            it.setText(f"{base}  · w pliku" if present else base)
+            it.setForeground(muted if present else T.q("text"))
+        self._sync_tpl_buttons()
 
     def _load_remote(self):
         self.load_btn.setEnabled(False)
@@ -296,10 +407,11 @@ class GitignoreDialog(SheetDialog):
             self.load_btn.setText(f"Pobrano {len(names)} szablonów")
             for n in names:
                 self._add_item(f"GitHub: {n}", ("remote", n))
+            self._mark_templates()
 
         def fail(msg):
             self.load_btn.setEnabled(True)
-            self.load_btn.setText("Pobierz więcej z GitHuba")
+            self.load_btn.setText("Więcej z GitHuba")
             notify(self, ".gitignore", "Nie udało się pobrać szablonów.\n\n" + msg)
 
         self.run_task(self.github.gitignore_templates, on_done=done, on_error=fail, quiet=True)
@@ -316,39 +428,134 @@ class GitignoreDialog(SheetDialog):
                 cb(txt)
             self.run_task(self.github.gitignore_template, name, on_done=done, quiet=True)
 
-    def _show(self, item, _prev=None):
-        if item:
-            self._text_for(item, self.preview.show_text)
+    def _insert_selected(self, *_):
+        it = self.list.currentItem()
+        if not it:
+            return
+        name = it.data(Qt.UserRole)[1]
+        if self._header(name) in self.editor.toPlainText():
+            return
+        self._text_for(it, lambda txt: self._append(f"{self._header(name)}\n{txt.strip()}", block=True))
+
+    # ---------------------------------------------------------------- edycja
+    def _append(self, text: str, block: bool = False):
+        cur = self.editor.toPlainText().rstrip("\n")
+        sep = ("\n\n" if block else "\n") if cur else ""
+        self.editor.setPlainText(cur + sep + text + "\n")
+        c = self.editor.textCursor()
+        c.movePosition(QTextCursor.End)
+        self.editor.setTextCursor(c)
+        self.editor.ensureCursorVisible()
+
+    def _quick_add(self):
+        rule = self.quick.text().strip().replace("\\", "/")
+        if not rule:
+            return
+        lines = [ln.strip() for ln in self.editor.toPlainText().splitlines()]
+        if rule not in lines:
+            self._append(rule)
+        self.quick.clear()
+
+    def _on_text(self):
+        dirty = self.editor.toPlainText() != self.original
+        if dirty:
+            self.state.setText(f"<span style='color:{T['warn']}'>niezapisane zmiany</span>")
+        elif not self.path.exists():
+            self.state.setText("nowy plik")
+        else:
+            n = sum(1 for ln in self.original.splitlines() if ln.strip() and not ln.strip().startswith("#"))
+            self.state.setText(f"{n} reguł" if n != 1 else "1 reguła")
+        self._mark_templates()
+
+    def _recolor(self):
+        self._hl.update_colors()
+        self._hl.rehighlight()
+
+    # ---------------------------------------------------------------- sprawdzanie
+    def _check(self):
+        self.check_btn.setEnabled(False)
+        self.check_info.setText("Sprawdzanie…")
+
+        def done(res):
+            skipped, tracked = res
+            # Pokaż najgłębsze wpisy (git zgłasza też folder nadrzędny, gdy wszystko w nim jest pomijane).
+            skipped = [x for x in skipped if not any(o != x and o.startswith(x) for o in skipped)]
+            self.check_btn.setEnabled(True)
+            self.tracked = tracked
+            self.results.clear()
+            for x in skipped[:500]:
+                self.results.addItem(QListWidgetItem(x))
+            more = " (pokazano 500)" if len(skipped) > 500 else ""
+            self.check_info.setText(f"Pominięte: {len(skipped)}{more}" if skipped
+                                    else "Żaden nowy plik nie pasuje do reguł.")
+            self.results.setVisible(bool(skipped))
+            if tracked:
+                names = ", ".join(tracked[:3]) + (f" i {len(tracked) - 3} innych" if len(tracked) > 3 else "")
+                n = len(tracked)
+                if n == 1:
+                    lead = "<b>1 plik</b> pasujący do reguł jest już"
+                elif n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+                    lead = f"<b>{n} pliki</b> pasujące do reguł są już"
+                else:
+                    lead = f"<b>{n} plików</b> pasujących do reguł jest już"
+                self.tracked_bar.html = (f"{lead} w repozytorium ({names}). Sama reguła ich nie usunie – "
+                                         "wyjmij je z repozytorium, na dysku zostaną.")
+                self.tracked_bar._paint()
+            self.tracked_bar.setVisible(bool(tracked))
+
+        def fail(msg):
+            self.check_btn.setEnabled(True)
+            self.check_info.setText("Nie udało się sprawdzić.")
+            notify(self, ".gitignore", msg)
+
+        self.run_task(self.repo.match_ignore, self.editor.toPlainText(), on_done=done, on_error=fail, quiet=True)
+
+    # ---------------------------------------------------------------- zapis
+    def _write(self) -> bool:
+        text = self.editor.toPlainText()
+        if not text.strip() and not self.path.exists():
+            return True
+        if text and not text.endswith("\n"):
+            text += "\n"
+        try:
+            self.path.write_text(text, encoding="utf-8")
+        except OSError as e:
+            notify(self, "Nie udało się zapisać", str(e))
+            return False
+        self.original = self.editor.toPlainText()
+        return True
 
     def _ok(self):
-        items = [self.list.item(i) for i in range(self.list.count())
-                 if self.list.item(i).checkState() == Qt.Checked]
-        if not items:
-            self.reject()
-            return
-        missing = [it.data(Qt.UserRole)[1] for it in items
-                   if it.data(Qt.UserRole)[0] == "remote" and it.data(Qt.UserRole)[1] not in self.remote_cache]
-        if missing:
-            pending = set(missing)
+        if self._write():
+            self.accept()
 
-            def got(name):
-                def _cb(_txt):
-                    pending.discard(name)
-                    if not pending:
-                        self._ok()
-                return _cb
-            for n in missing:
-                self._text_for(next(it for it in items if it.data(Qt.UserRole)[1] == n), got(n))
+    def _save_untrack(self):
+        if not self._write():
             return
-        gi = Path(self.folder) / ".gitignore"
-        existing = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
-        chunks = [existing.rstrip("\n")] if existing.strip() else []
-        for it in items:
-            kind, name = it.data(Qt.UserRole)
-            text = TEMPLATES[name] if kind == "local" else self.remote_cache[name]
-            header = f"# ===== {name} ====="
-            if header in existing:
-                continue
-            chunks.append(f"{header}\n{text.strip()}")
-        gi.write_text("\n\n".join(chunks) + "\n", encoding="utf-8")
+        try:
+            self.repo.stop_tracking(self.tracked)
+        except Exception as e:  # noqa: BLE001
+            notify(self, "Nie udało się", str(e))
+            return
+        self.result_msg = (f"Zapisano .gitignore. Wyjęto z repozytorium: {len(self.tracked)} – "
+                           "zatwierdź i wyślij zmiany.")
         self.accept()
+
+    def reject(self):
+        if self.editor.toPlainText() != self.original and not ask(
+                self, "Niezapisane zmiany", "Zamknąć bez zapisywania zmian w .gitignore?", "Odrzuć zmiany",
+                danger=True):
+            return
+        super().reject()
+
+
+def _head(*widgets) -> QWidget:
+    w = QWidget()
+    h = QHBoxLayout(w)
+    h.setContentsMargins(16, 8, 12, 8)
+    h.setSpacing(10)
+    for x in widgets:
+        h.addWidget(x)
+    h.addStretch(1)
+    w.setMinimumHeight(48)
+    return w

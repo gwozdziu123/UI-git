@@ -37,7 +37,7 @@ Własny plik `.exe`: uruchom `build_exe.bat` → wynik w `dist\UI-git.exe`
 | Prawy klik na pliku | otwórz, pokaż w folderze, ignoruj (plik / rozszerzenie / folder), cofnij zmiany |
 | Pobierz / Wyślij | `git pull` / `git push` (pierwsze wysłanie ustawia śledzenie gałęzi) |
 | Historia | ostatnie 300 commitów, podgląd zmian w każdym z nich |
-| .gitignore… | wbudowane szablony (Python, C#, TIA Portal, GX Works, Office…) + szablony z GitHuba |
+| .gitignore | edytor pliku .gitignore: własne reguły, szablony (Python, C#, TIA Portal, GX Works, Office… + z GitHuba), podgląd pomijanych plików i wyjmowanie z repozytorium plików, które już tam są |
 | Dziennik | polecenia git wykonane przez aplikację i ich wynik |
 
 ## Dobrze wiedzieć
