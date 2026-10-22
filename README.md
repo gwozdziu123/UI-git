@@ -3,6 +3,9 @@
 Prosta aplikacja okienkowa (Windows) do zarządzania repozytoriami na GitHubie:
 powiązujesz lokalny folder z repozytorium i wysyłasz zmiany jednym przyciskiem.
 
+
+![alt text](https://raw.githubusercontent.com/gwozdziu123/UI-git/refs/heads/main/photo/easygit_ciemny.png)
+
 ## Wymagania
 
 - **Git for Windows** – https://git-scm.com/download/win (wersja 2.31 lub nowsza)
